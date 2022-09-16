@@ -1,0 +1,557 @@
+source activate tensorflow-gpu 
+
+Potato Disease Classification
+---------------------------------
+Dataset credits: https://www.kaggle.com/arjuntejaswi/plant-village
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+#Import all the Dependencies
+
+import tensorflow as tf
+from tensorflow.keras import models, layers
+import matplotlib.pyplot as plt
+import numpy as np
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+1. Load the Data
+
+We will use tenflow dataset to download these images into tf.data.dataset. 
+If you dont know about Tf.dataset.
+
+What is the purpose of tf.data.dataset?
+
+Let say you have all these images in hard disk and you can download all these images in batches. 
+Because there can be so many images.so if you read these images in batches into tf dataset structure. 
+Then you can do .filter, .map , you can do amazing things
+
+1.1 Set all the Constants
+
+BATCH_SIZE = 32
+IMAGE_SIZE = 256
+CHANNELS=3  #rgb channel,
+EPOCHS=50
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+1.2 Import data into tensorflow dataset object/Generates a tf.data.Dataset from image files in a directory
+
+We will use image_dataset_from_directory api to load all images in tensorflow dataset: 
+
+https://www.tensorflow.org/api_docs/python/tf/keras/preprocessing/image_dataset_from_directory
+
+dataset = tf.keras.preprocessing.image_dataset_from_directory(
+    "PlantVillage",
+    seed=123,
+    shuffle=True,
+    image_size=(IMAGE_SIZE,IMAGE_SIZE),
+    batch_size=BATCH_SIZE
+)
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+So our data directory is "PlantVillage", we say shuffle= True, It will randomly suffle the images and load them. I will then say image_size=??,
+
+Let go to project folder and open the directories and if you look at the image size you see 256 by 256. 
+All of these images are 256 by 256. You can verify that I will create couple of constants latter. 
+So I will say my IMAGE_SIZE=256 by 256 and BATCH_SIZE = 32 , 32 is like a standard batch size. 
+I will again stored it as a constant.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Class Names
+
+class_names = dataset.class_names
+class_names
+
+Basically your folder names are your class names
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+len(dataset)
+
+Do you have any clue why its showing 68
+Because evey element in the dataset is a batch of 32 images So if you do
+68 * 32 
+
+2176
+
+The last batch is not perfect so it showing 2176 images but you got an idea. 
+Lets just explore this images 
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+for image_batch, labels_batch in dataset.take(1): # take(1) gives you one batch
+    print(image_batch.shape)
+    print(labels_batch.numpy()) #every element is a tensor so you need to convert to numpy
+
+
+
+One batch is how many images ??. There are 32 images , each image is 256 by 256 and what is this 3, 
+basically it is the rgb channel, lets initialize CHANNELS= 3 as we have 3 images
+
+Label batch is [0, 1, 2] ['Potato___Early_blight', 'Potato___Late_blight', 'Potato___healthy']
+
+There are 3 classes and 3 image folders
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+for image_batch, labels_batch in dataset.take(1): # take(1) one batch
+    print(image_batch[0]) #first image
+    print("*******************") # every image is a 3D-Array
+    print(image_batch[0].numpy()) # every image is a 3D-Array
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+for image_batch, labels_batch in dataset.take(1): # take(1) one batch
+#     print(image_batch[0])
+    print(image_batch[0].shape) #3D-Array
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+1.3 Visualize some of the images from our dataset
+
+Let's try to visualize the first image
+
+for image_batch, labels_batch in dataset.take(1):
+    
+    plt.imshow(image_batch[0].numpy().astype("uint8")) # converting to integer
+    plt.title(class_names[labels_batch[0]])
+    plt.axis("off")
+
+
+Since suffle is True. Every time you execute it will be different.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+Let's display couple of images. Out of 32 i want to display 12 images
+
+plt.figure(figsize=(10, 10))
+for image_batch, labels_batch in dataset.take(1):
+    for i in range(12):
+        ax = plt.subplot(3, 4, i + 1)
+        plt.imshow(image_batch[i].numpy().astype("uint8")) # converting to integer
+        plt.title(class_names[labels_batch[i]])
+        plt.axis("off")
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+1.4 Function to Split Dataset
+Dataset should be bifurcated into 3 subsets, namely:
+
+- **Training**: Dataset to be used while training
+- **Validation**: Dataset to be tested against while training
+- **Test**: Dataset to be tested against after we trained a model
+
+len(dataset) # 68
+
+80% ==> training
+
+20% ==> 10% validation, 10% test
+
+len(dataset) # 68
+
+80% ==> training
+
+20% ==> 10% validation, 10% test
+
+This validation set will be used during the training process, when you run each epoch, after each epoch 
+you do validation on this 10% . Lets define the EPOCHS = 50,. This is again trail and error. it can be 20, 30. 
+Let's say we run 50 epochs and the end of every epoch we used this validation dataset to do the validation
+
+Once we are done through 50 epochs. Once we have final model, then we use this 10% test datasets to measure the accuracy of the model.
+
+Before we deploy our model to into the word. we want to use this 10% test dataset to test the performance of our model.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+train_size = 0.8
+len(dataset)*train_size
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+train_ds = dataset.take(54)
+len(train_ds)
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+# temporarily we will save the remaining 20% as a test dataset but this is not exactly test dataset
+
+test_ds = dataset.skip(54) # eqivalent in pandas [54:]
+len(test_ds)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+# validation size is 10%. 10% of my actual dataset 68 is 6.8
+val_size=0.1
+len(dataset)*val_size
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+# get the validation dataset from the 20% temporary test data
+val_ds = test_ds.take(6)
+len(val_ds)
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+# Remove the validation data set from temporary test data 14 - 6 = 8
+# Actual test data set
+test_ds = test_ds.skip(6)
+len(test_ds)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# function goal is to take tensorflow dataset and also take the train_split ratio, 
+
+def get_dataset_partitions_tf(ds, train_split=0.8, val_split=0.1, test_split=0.1, shuffle=True, shuffle_size=10000):
+    assert (train_split + test_split + val_split) == 1
+    
+    ds_size = len(ds)
+    
+    if shuffle:
+        ds = ds.shuffle(shuffle_size, seed=12)
+    
+    train_size = int(train_split * ds_size)
+    val_size = int(val_split * ds_size)
+    
+    train_ds = ds.take(train_size)    
+    val_ds = ds.skip(train_size).take(val_size)
+    test_ds = ds.skip(train_size).skip(val_size)
+    
+    return train_ds, val_ds, test_ds
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+train_ds, val_ds, test_ds= get_dataset_partitions_tf(dataset)
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+print(len(train_ds))
+print(len(val_ds))
+print(len(test_ds))
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2. Preprocessing  - go to slide
+2.1 Cache, Shuffle, and Prefetch the Dataset
+
+
+train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.cache().shuffle(1000).prefetch(buffer_size=tf.data.AUTOTUNE)
+test_ds = test_ds.cache().shuffle(1000).prefetch(buffer_size=tf.data.AUTOTUNE)
+
+
+- go to slide
+
+
+Cache: It will read the image from the disk and then for the next iteration when you select the new image. It will keep the image in the memory. This improve the performamce of your pipeline
+
+Prefetch: , if your are using CPU and GPU for training. If your GPU is busy training. pre-fetch will load the next set of batch to CPU from your disk and that will improve the performance
+
+tf.data.AUTOTUNE - I am allowing tensorflow how many batches to load while GPU is training.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+2.1 Creating a Layer for Resizing and Normalization
+
+resize_and_rescale = tf.keras.Sequential([
+  layers.experimental.preprocessing.Resizing(IMAGE_SIZE, IMAGE_SIZE),
+  layers.experimental.preprocessing.Rescaling(1./255),
+])
+
+Before we feed our images to network, we should be resizing it to the desired size. Moreover, to improve model performance, we should normalize the 
+image pixel value (keeping them in range 0 and 1 by dividing by 256). This should happen while training as well as inference. Hence we can add that 
+as a layer in our Sequential Model.
+
+You might be thinking why do we need to resize (256,256) image to again (256,256). You are right we don't need to but this will be useful when we 
+are done with the training and start using the model for predictions. At that time somone can supply an image that is not (256,256) and this layer 
+will resize it
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.2 Data Augmentation
+
+data_augmentation = tf.keras.Sequential([
+  layers.experimental.preprocessing.RandomFlip("horizontal_and_vertical"),
+  layers.experimental.preprocessing.RandomRotation(0.2),
+])
+
+Data Augmentation is needed when we have less data, this boosts the accuracy of our model by augmenting the data.
+
+What we do is lets say if have this original image in your training dataset. you create four new samples training samples out of that. 
+You apply different transformation let's say horizontal flip, contrast. you see contrast is increased in this image. So You taking same 
+image you applying some filter, some contrast, some transformation, you are generating new training samples. See here I roated the images, 
+and now i will use all five images for my training. I have one image i have created four extra image. I used all 5 images for my training. 
+So that my model is robust. So tomorrow when i start predicting in the real world if someone gives me roated image my model knows how to predict that. 
+Thats the idea behind data agugmentation
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+3 Model Architecture
+We use a CNN coupled with a Softmax activation in the output layer. softmax function normalizes the probability of your classes.
+
+We also add the initial layers for resizing, normalization and Data Augmentation.
+
+We are going to use convolutional neural network (CNN) here. CNN is popular for image classification tasks. you should know the fundamentals of CNN
+
+input_shape = (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+n_classes = 3
+
+model = models.Sequential([
+    resize_and_rescale,
+    data_augmentation,
+    layers.Conv2D(32, kernel_size = (3,3), activation='relu', input_shape=input_shape),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64,  kernel_size = (3,3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64,  kernel_size = (3,3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(n_classes, activation='softmax'),
+])
+
+model.build(input_shape=input_shape)
+
+
+softmax function normalizes the probability of your classes.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+model.summary()
+
+So this summary just print the quick summary, the parameters, these are the weights you need to train. Thats why its say trainable parameters. 
+You know you are doing back propagations on all this weights basically, no of weights
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+3.2 Compiling the Model
+
+model.compile(
+    optimizer='adam',
+    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+    metrics=['accuracy']
+)
+
+
+
+In deep learning we always define the neural network architecture,
+
+Then we do compile using We use optimers like adam, adam is a famous optimizer. Then you define your loss function SparseCategoricalCrossentropy, at last your metrics as accuracy.
+
+In each epoch what type of metric we will use to track the gradient descent basically. So the accuracy is the metrics that we use to kind of track your training process.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+3.3 Train the Model
+
+history = model.fit(
+    train_ds,
+    epochs=EPOCHS,
+    batch_size=BATCH_SIZE,
+    verbose=1,
+    validation_data=val_ds
+)
+
+And finally the third step which is model.fit. Here you actually you train your network. We have 50 epochs, we have batch size of 32 and 
+i will do verbose so that i can see whats going on. we have validation data as well by the way. This validation dataset will be used in each epoch. 
+it can help you track the accuracy
+
+By the way I will record the history of every epochs in the history parameter, so that we can do some plot. we can chart some plots. later on.
+
+Its gonna a take some time based on what kind of computer you have some time people have you know GPUs. GPUs makes this process faster. Id you don't 
+it may take some time. you can try with less epochs. 50 epochs is taking time. 50 may be high, you may try with less epochs
+
+Let me explain you all the prameters you can see here. in the first go the acuracy you got on the training data is 0.498. But the accuracy on the 
+validation dataset is 0.55%.
+
+You can understand it will train your model first on training dataset. It will measure the accuracy and then it kind of running little test on. 
+it will run little test using validation dataset and it get 55%. Then its keep running and then you will see as we have more epochs the accuracies 
+keeps on improving and finally we have training accuray of 99% and validation accuracy also 99.5%
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3.4 Model Accuracy on Test Data
+scores = model.evaluate(test_ds)
+
+Now i will run test on my test dataset. Before you deploy your model. you want to run a test. You want to figure out how well your model performing. 
+By trying it out on a test dataset. So that it is not biased. You model has not seen this dataset. This is the first time we are trying it. and it can give us good understanding
+
+You can see above that we get 99% accuracy for our test dataset. This is considered to be a pretty good accuracy
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+scores
+
+[0.018904216587543488, 0.9921875]
+
+If you look at the score paramter, it's a python list which has first parameter as loss. and the second parameter is accuracy. 
+Scores is just a list containing loss and accuracy value
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+history
+
+
+<keras.callbacks.History at 0x1ee0e9d0460>
+
+
+Now i will play with history parameters. we stored history. Let's see what this history is ?.
+
+It's tell me it a keras callbacks history. Immediately i will go to my friend. you know who is my friend 
+https://www.tensorflow.org/api_docs/python/tf/keras/callbacks/History
+
+History has some parameters.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+history.params
+
+Its just telling me 50 epochs, 54 steps, and verbose
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+history.history.keys()
+
+dict_keys(['loss', 'accuracy', 'val_loss', 'val_accuracy'])
+
+
+You get four parameters 'loss', 'accuracy', 'val_loss', 'val_accuracy'. loss, accuracy, val loss etc are a python list containing values of loss, 
+accuracy etc at the end of each epoch.
+
+We ran 50 epochs. So for each parameter we have 50 values. for loss we have 50 , for accuracy we have 50, validation 50 and so on 
+and thats exactly what this is.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+type(history.history['accuracy']) # its a python list 
+
+len(history.history['accuracy']) #having 50 values
+
+history.history['accuracy'][:5] # show loss for first 5 epochs
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+# training and validation accuracy
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+# training and validation loss
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+
+Getting all the list stored in different variables. Then i will plot the accuracy. 
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(range(EPOCHS), acc, label='Training Accuracy')
+plt.plot(range(EPOCHS), val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+--------------------------------------------------------
+plt.subplot(1, 2, 2)
+plt.plot(range(EPOCHS), loss, label='Training Loss')
+plt.plot(range(EPOCHS), val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.show()
+
+
+Loss is nothing but an error in back propagation that keeps on reducing as we proceed forward in your epochs. So far it looks good. 
+Now we want to make predictions
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+3.5 Model Prediction
+
+Run prediction on a sample image
+
+
+import numpy as np
+for images_batch, labels_batch in test_ds.take(1):  # 32 images
+    
+    first_image = images_batch[0].numpy().astype('uint8') # take the first image
+    first_label = labels_batch[0].numpy() # return the label of the image [ 0 or 1 or 2]
+    
+    print("First image to predict")
+    plt.imshow(first_image)
+    print("Actual Label:",class_names[first_label])
+    
+--------------------------------------------------------------------------------------------------
+    batch_prediction = model.predict(images_batch) # this will be the prediction for 32 images 
+    
+    print("batch_prediction: ",batch_prediction[0])
+    print("Predicted Label:",class_names[np.argmax(batch_prediction[0])])
+
+
+You may be thing why the images is changing because we are doing shuffling here. That's why image keeps on changing. 
+My model is performing awesome see. Se we are trying different cases and its exactly telling me what is this. 
+You see this is the power of convolutional neural network okay.
+
+Now what i am going to do is this I am going to write a function and i am not going to go into detail. 
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+#Write a function for inference
+
+def predict(model, img):
+    img_array = tf.keras.preprocessing.image.img_to_array(images[i].numpy())
+    img_array = tf.expand_dims(img_array, 0) #create a batch 
+
+    predictions = model.predict(img_array)
+
+    predicted_class = class_names[np.argmax(predictions[0])] 
+    confidence = round(100 * (np.max(predictions[0])), 2)
+    return predicted_class, confidence
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+This is just a simple function that is taking model and image as a input and it telling you what is the predicted class and the what is the confidence. 
+100% confidence mean the accuracy of the prediction is 100%. so that your confidence score.
+
+If you look at the code we converted image into an image array and then we created a batch out of it.After that we called predict function and 
+then we figured out predicted class and then we find the confidence.
+
+
+Run the Prediction on Entire batch
+Now run inference on few sample images
+
+plt.figure(figsize=(15, 15))
+for images, labels in test_ds.take(1):
+    for i in range(9): #pick only 9 images 
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype("uint8")) 
+        
+        predicted_class, confidence = predict(model, images[i].numpy())
+        actual_class = class_names[labels[i]] 
+        
+        plt.title(f"Actual: {actual_class},\n Predicted: {predicted_class}.\n Confidence: {confidence}%")
+        
+        plt.axis("off")
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+Confidence is high in most of the cases. This amazing folks, amazing, amazing performace indeed.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+5. Saving the Model
+
+
+model_version=1
+model.save(f"../saved_models/{model_version}")
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+Now let's say you made some changes into your model and you want to save it as version 2
+
+input_shape = (BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, CHANNELS)
+n_classes = 3
+
+model = models.Sequential([
+    resize_and_rescale,
+#     data_augmentation,
+    layers.Conv2D(32, kernel_size = (3,3), activation='relu', input_shape=input_shape),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64,  kernel_size = (3,3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64,  kernel_size = (3,3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(n_classes, activation='softmax'),
+])
+
+model.build(input_shape=input_shape)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+model_version=2
+model.save(f"../saved_models/{model_version}")
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+If you want to automatically increment the model versions. you can do that using os library
+
+import os
+print(os.listdir("../saved_models"))
+print([int(i) for i in os.listdir("../saved_models")])
+print(max([int(i) for i in os.listdir("../saved_models")])+1)
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+import os
+model_version=max([int(i) for i in os.listdir("../models") + [0]])+1
+model.save(f"../models/{model_version}")
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+model.save("../potatoes.h5")
